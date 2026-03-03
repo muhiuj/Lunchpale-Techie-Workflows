@@ -1,0 +1,362 @@
+{
+  "name": "Kroger Grocery List Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "61217ed3-2696-4035-9cc3-c6b3dc451bfe",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d60add03-1c7d-4b93-a5b0-55a937b6eacc",
+              "name": "zipCode",
+              "value": "YOUR_ZIP_CODE",
+              "type": "string"
+            },
+            {
+              "id": "a6727579-743d-410f-8674-3e0d647eaba3",
+              "name": "searchTerms",
+              "value": "[\"milk\", \"eggs\", \"bread\", \"chicken breasts\", \"bananas\"]",
+              "type": "string"
+            },
+            {
+              "id": "cadda1cf-995c-4637-be6d-c68738b3143f",
+              "name": "storeLimit",
+              "value": 3,
+              "type": "number"
+            },
+            {
+              "id": "ac03810c-c445-4c99-8132-526d64de8691",
+              "name": "productLimit",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "d79f916e-d90b-4f05-8008-6a12ed4d12e5",
+              "name": "clientId",
+              "value": "YOUR_KROGER_CLIENT_ID",
+              "type": "string"
+            },
+            {
+              "id": "a1c6fcb2-6dfe-4595-ac07-7d35b54e733d",
+              "name": "clientSecret",
+              "value": "YOUR_KROGER_CLIENT_SECRET",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "63394c64-fee3-486e-b889-9cf96f999300",
+      "name": "Manual Mapping"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.kroger.com/v1/connect/oauth2/token",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "scope",
+              "value": "product.compact"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        416,
+        0
+      ],
+      "id": "4b6e8f83-6c6a-4809-a21a-f2f1c9673452",
+      "name": "Kroger API Auth",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "url": "https://api.kroger.com/v1/locations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter.zipCode.near",
+              "value": "YOUR_ZIP_CODE"
+            },
+            {
+              "name": "filter.limit",
+              "value": "3"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        624,
+        0
+      ],
+      "id": "764e65f0-ae5e-456d-ae8c-4d3588fa190d",
+      "name": "Get Stores",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "const stores = $input.first().json.data;\n\n// Filter out fulfillment centers (they have \"FC\" in locationId)\nconst retailStores = stores.filter(store => \n  !store.locationId.includes('FC')\n);\n\n// Extract what we need including full address\nconst storeList = retailStores.map(store => ({\n  locationId: store.locationId,\n  name: store.name,\n  address: `${store.address.addressLine1}, ${store.address.city}, ${store.address.state} ${store.address.zipCode}`\n}));\n\nreturn [{\n  json: {\n    stores: storeList,\n    primaryStoreId: storeList[0].locationId,\n    primaryStoreName: storeList[0].name,\n    primaryStoreAddress: storeList[0].address\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        0
+      ],
+      "id": "4367062b-a22e-499b-9c2a-a7d4010809d0",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst previousData = items[0].json;\n\nconst searchTerms = [\"milk\", \"eggs\", \"bread\", \"chicken breast\", \"bananas\"];\nconst primaryStoreId = previousData.primaryStoreId;\nconst primaryStoreName = previousData.primaryStoreName;\nconst primaryStoreAddress = previousData.primaryStoreAddress;\n\n// Create one item per search term, carrying store info forward\nreturn searchTerms.map(term => ({\n  json: {\n    searchTerm: term,\n    locationId: primaryStoreId,\n    storeName: primaryStoreName,\n    storeAddress: primaryStoreAddress\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "3389422f-a3cd-41fa-b450-c3863edcdbf0",
+      "name": "Split Search Terms"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Your Google Sheet Name",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "storeName": "={{ $json.storeName }}",
+            "SearchTerm": "={{ $json.searchTerm }}",
+            "productName": "={{ $json.productName }}",
+            "brand": "={{ $json.brand }}",
+            "size": "={{ $json.size }}",
+            "regularPrice": "={{ $json.regularPrice }}",
+            "promoPrice": "={{ $json.promoPrice }}",
+            "stockLevel": "={{ $json.stockLevel }}",
+            "productId": "={{ $json.productId }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {"id": "timestamp", "displayName": "timestamp", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false},
+            {"id": "storeName", "displayName": "storeName", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false},
+            {"id": "SearchTerm", "displayName": "SearchTerm", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false},
+            {"id": "productName", "displayName": "productName", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false},
+            {"id": "brand", "displayName": "brand", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false},
+            {"id": "size", "displayName": "size", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false},
+            {"id": "regularPrice", "displayName": "regularPrice", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false},
+            {"id": "promoPrice", "displayName": "promoPrice", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false},
+            {"id": "stockLevel", "displayName": "stockLevel", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false},
+            {"id": "productId", "displayName": "productId", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false}
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1664,
+        0
+      ],
+      "id": "1cd1180f-02c0-4352-96a8-adbb2de68901",
+      "name": "Append row in sheet",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "url": "https://api.kroger.com/v1/products",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter.location",
+              "value": "={{ $json.locationId }}"
+            },
+            {
+              "name": "filter.term",
+              "value": "={{ $json.searchTerm }}"
+            },
+            {
+              "name": "filter.limit",
+              "value": "={{ $('Manual Mapping').item.json.productLimit }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1248,
+        0
+      ],
+      "id": "7dc14e14-25b2-4dee-8ba9-9d1040c08a6e",
+      "name": "Search Products",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all items from Search Products (API responses)\nconst allInputs = $input.all();\n\n// Get all items from Split Search Terms (store/search info)\nconst splitTermsItems = $('Split Search Terms').all();\n\nconst timestamp = new Date().toISOString();\nlet allRows = [];\n\n// Process each search result, pairing with corresponding store info\nfor (let i = 0; i < allInputs.length; i++) {\n  const apiResponse = allInputs[i].json;\n  const searchInfo = splitTermsItems[i].json;\n  \n  const products = apiResponse.data || [];\n  const searchTerm = searchInfo.searchTerm || 'Unknown';\n  const storeName = searchInfo.storeName || 'Unknown';\n  const storeAddress = searchInfo.storeAddress || 'Unknown';\n  \n  const rows = products.map(product => {\n    // Get the first item from items array\n    const items = product.items || [];\n    const item = items[0] || {};\n    \n    // Extract price - handle nested structure carefully\n    const regularPrice = item.price?.regular ?? null;\n    const promoPrice = item.price?.promo ?? null;\n    const stockLevel = item.inventory?.stockLevel ?? 'Unknown';\n    \n    return {\n      json: {\n        timestamp: timestamp,\n        storeName: `${storeName} - ${storeAddress}`,\n        searchTerm: searchTerm,\n        productName: product.description || '',\n        brand: product.brand || '',\n        size: item.size || '',\n        regularPrice: regularPrice,\n        promoPrice: promoPrice,\n        stockLevel: stockLevel,\n        productId: product.productId || ''\n      }\n    };\n  });\n  \n  allRows = allRows.concat(rows);\n}\n\nreturn allRows;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        0
+      ],
+      "id": "9cf6d40d-6cfa-48ef-a003-75628c5849b9",
+      "name": "Format Results"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Manual Mapping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Mapping": {
+      "main": [
+        [
+          {
+            "node": "Kroger API Auth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kroger API Auth": {
+      "main": [
+        [
+          {
+            "node": "Get Stores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Stores": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Split Search Terms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Search Terms": {
+      "main": [
+        [
+          {
+            "node": "Search Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Products": {
+      "main": [
+        [
+          {
+            "node": "Format Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Results": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
