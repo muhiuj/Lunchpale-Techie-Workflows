@@ -1,0 +1,305 @@
+{
+  "name": "ERCOT All-Zone Price Spike Alert (Local)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "7fd8721a-c763-47d7-800a-745ce5a0d838",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ercotb2c.b2clogin.com/ercotb2c.onmicrosoft.com/B2C_1_PUBAPI-ROPC-FLOW/oauth2/v2.0/token",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "password"
+            },
+            {
+              "name": "client_id",
+              "value": "fec253ea-0d06-4272-a5e6-b478baeecd70"
+            },
+            {
+              "name": "username",
+              "value": "YOUR_ERCOT_EMAIL"
+            },
+            {
+              "name": "password",
+              "value": "YOUR_ERCOT_PASSWORD"
+            },
+            {
+              "name": "scope",
+              "value": "openid fec253ea-0d06-4272-a5e6-b478baeecd70 offline_access"
+            },
+            {
+              "name": "response_type",
+              "value": "token"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        220,
+        0
+      ],
+      "id": "5519555c-bcfc-4912-841c-8dbfcfe49f2d",
+      "name": "Get ERCOT Token"
+    },
+    {
+      "parameters": {
+        "url": "https://api.ercot.com/api/public-reports/np6-905-cd/spp_node_zone_hub",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "deliveryDateFrom",
+              "value": "={{ $now.format('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "deliveryDateTo",
+              "value": "={{ $now.format('yyyy-MM-dd') }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            },
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "YOUR_ERCOT_SUBSCRIPTION_KEY"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; ERCOTPriceAlert/1.0)"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        440,
+        0
+      ],
+      "id": "8bb98060-b1cc-465e-a12d-fa3e4406ed04",
+      "name": "GET ERCOT PRICES"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst data = response.data;\n\n// Filter for only \"LZ\" type records (skip \"LZEW\" duplicates)\nconst lzRecords = data.filter(row => row[4] === 'LZ');\n\n// The four ERCOT load zones we monitor\nconst zones = ['LZ_NORTH', 'LZ_HOUSTON', 'LZ_SOUTH', 'LZ_WEST'];\nconst thresholdMWh = 100;\nconst spikes = [];\n\nfor (const zoneName of zones) {\n  const zoneRecords = lzRecords.filter(row => row[3] === zoneName);\n  if (zoneRecords.length === 0) continue;\n\n  // Get the most recent record for this zone\n  const latest = zoneRecords[zoneRecords.length - 1];\n  const pricePerMWh = parseFloat(latest[5]);\n\n  if (pricePerMWh > thresholdMWh) {\n    spikes.push({\n      deliveryDate: latest[0],\n      deliveryHour: latest[1],\n      deliveryInterval: latest[2],\n      zone: latest[3],\n      pricePerMWh: pricePerMWh.toFixed(2),\n      pricePerKWh: (pricePerMWh / 1000).toFixed(4),\n      multiplier: (pricePerMWh / 25).toFixed(1),\n      readableTime: `${latest[0]} Hour ${latest[1]}, Interval ${latest[2]}`\n    });\n  }\n}\n\nreturn [{\n  json: {\n    hasSpikes: spikes.length > 0,\n    spikeCount: spikes.length,\n    spikes: spikes,\n    thresholdMWh: thresholdMWh,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "f4813ac8-06f9-4715-b6e6-7152ce38b499",
+      "name": "Parse All Zone Prices"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "befa16cf-f4b0-4dfc-86f4-91427609261d",
+              "leftValue": "={{ $json.hasSpikes }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        880,
+        0
+      ],
+      "id": "f43155c1-9119-4176-ad14-232916853910",
+      "name": "Any Spikes?"
+    },
+    {
+      "parameters": {
+        "url": "YOUR_PUBLISHED_GOOGLE_SHEET_CSV_URL",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1100,
+        -96
+      ],
+      "id": "gs1a2b3c-6666-4777-8888-999900001111",
+      "name": "Fetch Subscriber Sheet"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get raw CSV text from the HTTP request\nconst rawCSV = $input.first().json.data || $input.first().json;\nlet csvText = typeof rawCSV === 'string' ? rawCSV : JSON.stringify(rawCSV);\n\n// Parse CSV rows into subscriber objects\nconst lines = csvText.trim().split('\\n');\nconst headers = lines[0].split(',').map(h => h.trim().replace(/\\\"/g, ''));\n\nconst subscribers = [];\nfor (let i = 1; i < lines.length; i++) {\n  const values = lines[i].split(',').map(v => v.trim().replace(/\\\"/g, ''));\n  if (values.length >= 3 && values[2]) {\n    subscribers.push({\n      firstName: values[0] || '',\n      lastName: values[1] || '',\n      email: values[2] || '',\n      zone: values[3] || ''\n    });\n  }\n}\n\n// Get spike data from Parse All Zone Prices node\nconst spikeData = $('Parse All Zone Prices').first().json;\nconst spikes = spikeData.spikes;\n\n// For each spike zone, find matching subscribers and build alerts\nconst alerts = [];\n\nfor (const spike of spikes) {\n  const zoneSubscribers = subscribers.filter(sub => sub.zone === spike.zone);\n\n  for (const sub of zoneSubscribers) {\n    const message = `Hi ${sub.firstName},\\n\\n⚡ TEXAS ENERGY PRICE SPIKE ALERT ⚡\\n\\nCurrent wholesale price: $${spike.pricePerMWh}/MWh ($${spike.pricePerKWh}/kWh)\\nThat's ${spike.multiplier}x the normal rate!\\n\\nZone: ${spike.zone}\\nTime: ${spike.readableTime}\\n\\n💡 TIP: Avoid running your AC, dishwasher, or dryer right now. Wait 1-2 hours for prices to drop.\\n\\nThis alert is from Lunchpale Techie Workflows.\\n\\nFollow along:\\nInstagram: https://www.instagram.com/lunchpaletechie\\nYouTube: https://www.youtube.com/@muhiuj`;\n\n    alerts.push({\n      json: {\n        email: sub.email,\n        firstName: sub.firstName,\n        zone: spike.zone,\n        subject: `⚡ Energy Spike: ${spike.multiplier}x normal in ${spike.zone}`,\n        alertMessage: message\n      }\n    });\n  }\n}\n\n// If no subscribers match spiking zones, return empty so email node doesn't run\nif (alerts.length === 0) {\n  return [];\n}\n\nreturn alerts;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -96
+      ],
+      "id": "ba1a2b3c-7777-4888-8999-000011112222",
+      "name": "Build Subscriber Alerts"
+    },
+    {
+      "parameters": {
+        "fromEmail": "YOUR_SENDER_EMAIL",
+        "toEmail": "={{ $json.email }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.alertMessage }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1540,
+        -96
+      ],
+      "id": "em1a2b3c-9999-4000-8111-222233334444",
+      "name": "Send Alert Emails",
+      "credentials": {}
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get ERCOT Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get ERCOT Token": {
+      "main": [
+        [
+          {
+            "node": "GET ERCOT PRICES",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET ERCOT PRICES": {
+      "main": [
+        [
+          {
+            "node": "Parse All Zone Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse All Zone Prices": {
+      "main": [
+        [
+          {
+            "node": "Any Spikes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Spikes?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Subscriber Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Fetch Subscriber Sheet": {
+      "main": [
+        [
+          {
+            "node": "Build Subscriber Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Subscriber Alerts": {
+      "main": [
+        [
+          {
+            "node": "Send Alert Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
